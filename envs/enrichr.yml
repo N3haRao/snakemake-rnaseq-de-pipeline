@@ -1,0 +1,8 @@
+name: enrichr
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - r-enrichr=2.1=r40h6115d3f_1
+  

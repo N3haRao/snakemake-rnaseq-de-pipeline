@@ -1,0 +1,9 @@
+name: featurecounts
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+  - r
+dependencies:
+  - subread=1.6.4  # featureCounts included
+  - htseq=0.11.2  # htseq-count included
