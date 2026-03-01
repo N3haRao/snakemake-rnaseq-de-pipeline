@@ -1,0 +1,180 @@
+# Snakefile
+import os
+
+# Define sample information
+SAMPLES = {"CTLrep1", "CTLrep2", "CTLrep3", "KOrep1", "KOrep2", "KOrep3"}
+READ = {"R1", "R2"}
+
+# Define input file paths
+INPUT_DIR = "/projectnb/bf528/students/neharao/FINAL-PROJECT/data"
+FASTQ_PATTERN = os.path.join(INPUT_DIR, "{sample}_{read}.fastq.gz")
+
+# Define output file paths
+OUTPUT_DIR = "/projectnb/bf528/students/neharao/FINAL-PROJECT/results"
+
+rule all:
+    input:
+        expand('results/qc/{sample}_{read}_fastqc.html', sample=SAMPLES, read=READ),
+        expand('results/qc/{sample}_{read}_fastqc.zip', sample=SAMPLES, read=READ),
+        expand('results/trimmed/{sample}_R1_trimmed.fastq.gz', sample=SAMPLES),
+        expand('results/trimmed/{sample}_R2_trimmed.fastq.gz', sample=SAMPLES),
+        expand('results/trimmed/{sample}_R1_unpaired.fastq.gz', sample=SAMPLES),
+        expand('results/trimmed/{sample}_R2_unpaired.fastq.gz', sample=SAMPLES),
+        'results/qc/multiqc_report.html',
+        expand('results/qc/trim/{sample}_R1_fastqc.html', sample=SAMPLES),
+        expand('results/qc/trim/{sample}_R2_fastqc.html', sample=SAMPLES),
+        expand('results/qc/trim/{sample}_R1_fastqc.zip', sample=SAMPLES),
+        expand('results/qc/trim/{sample}_R2_fastqc.zip', sample=SAMPLES),
+        'results/qc/trim/multiqc_report.html',
+        expand('results/aligned/{sample}_Aligned.out.bam', sample=SAMPLES),
+	expand('results/samtools/{sample}_flagstats.txt', sample=SAMPLES),
+        expand('results/counts/{sample}.exon.txt', sample=SAMPLES),
+        'results/de/de_results.csv',
+        'results/de/volcano_plot.pdf',
+        'results/de/log2fc_histogram.pdf',
+        'results/de/pca_plot.pdf',
+        'results/gsea_results.csv'
+
+rule fastqc:
+    input:
+        r1=FASTQ_PATTERN.format(sample="{sample}", read="R1"),
+        r2=FASTQ_PATTERN.format(sample="{sample}", read="R2")
+    output:
+        html='results/qc/{sample}_{read}_fastqc.html',
+        zip='results/qc/{sample}_{read}_fastqc.zip'
+    conda:
+        "envs/fastqc.yml"
+    params:
+        threads=16
+    shell:
+        "fastqc -o {output.html} {output.zip} {input.r1} {input.r2}"
+
+rule multiqc:
+    input:
+	fastqc = expand("results/qc/{sample}_{read}_fastqc.html", sample=SAMPLES, read=READ)
+    output:
+        output_file = "results/qc/multiqc_report.html"
+    conda:
+        "envs/multiqc.yml"
+    shell:
+        "multiqc {input.fastqc} -o {output.output_file}"
+
+rule trim:
+    input:
+        r1='data/{sample}_R1.fastq.gz',
+        r2='data/{sample}_R2.fastq.gz',
+    output:
+        r1_trimmed='results/trimmed/{sample}_R1_trimmed.fastq.gz',
+        r2_trimmed='results/trimmed/{sample}_R2_trimmed.fastq.gz',
+        r1_unpaired='results/trimmed/{sample}_R1_unpaired.fastq.gz',
+        r2_unpaired='results/trimmed/{sample}_R2_unpaired.fastq.gz'
+    conda:
+        "envs/trimmomatic.yml"
+    params:
+        threads=16
+    shell:
+        "trimmomatic PE -threads {params.threads} {input.r1} {input.r2} {output.r1_trimmed} {output.r1_unpaired} {output.r2_trimmed} {output.r2_unpaired} SLIDINGWINDOW:4:20 MINLEN:36"
+
+rule fastqc_after_trim:
+    input:
+        r1_trimmed='results/trimmed/{sample}_R1_trimmed.fastq.gz',
+        r2_trimmed='results/trimmed/{sample}_R2_trimmed.fastq.gz'
+    output:
+        r1_html='results/qc/trim/{sample}_R1_fastqc.html',
+        r2_html='results/qc/trim/{sample}_R2_fastqc.html',
+        r1_zip='results/qc/trim/{sample}_R1_fastqc.zip',
+        r2_zip='results/qc/trim/{sample}_R2_fastqc.zip'
+    conda:
+        "envs/fastqc.yml"
+    params:
+        threads=16
+    shell:
+        "fastqc -o {output.r1_html} {output.r2_html} {output.r1_zip} {output.r2_zip} {input.r1_trimmed} {input.r2_trimmed}"
+
+rule multiqc_after_trim:
+    input:
+	fastqc = expand("results/qc/trim/{sample}_{read}_fastqc.html", sample=SAMPLES, read=READ)
+    output:
+        output_file = "results/qc/trim/multiqc_report.html"
+    conda:
+        "envs/multiqc.yml"
+    params:
+        threads=16
+    shell:
+        "multiqc {input.fastqc} -o {output.output_file}"
+
+rule align:
+    input:
+        r1_trimmed='results/trimmed/{sample}_R1_trimmed.fastq.gz',
+        r2_trimmed='results/trimmed/{sample}_R2_trimmed.fastq.gz',
+        star_dir=os.path.join(INPUT_DIR, "genome/STAR")
+    output:
+        aligned='results/aligned/{sample}_Aligned.out.bam'
+    conda:
+        "envs/star.yml"
+    params:
+        prefix=os.path.join('results/aligned/', "{sample}_"),
+        threads=16
+    shell:
+        '''
+        STAR --runThreadN {threads} \
+             --genomeDir {input.star_dir}/ \
+             --readFilesCommand zcat \
+             --readFilesIn {input.r1_trimmed} {input.r2_trimmed} \
+             --outSAMtype BAM Unsorted \
+             --outFileNamePrefix {params.prefix}
+        '''
+
+rule samtools_flagstat:
+    input:
+        bam = "results/aligned/{sample}.aligned.out.bam"
+    output:
+        flagstats = "results/samtools/{sample}_flagstats.txt"
+    conda:
+        "envs/samtools.yml"
+    shell:
+        '''
+        samtools flagstats {input.bam} > {output.flagstats}
+        wait  # Wait until the output file is fully written
+        '''
+
+rule verse:
+    input:
+        bam='results/aligned/{sample}.aligned.out.bam',
+        gtf='data/gencode.v45.primary_assembly.annotation.gtf'
+    output:
+        exon='results/counts/{sample}.exon.txt'
+    params:
+        prefix='results/counts/{sample}',
+        sample=lambda wildcards: wildcards.sample
+    shell:
+        '''
+        verse -S -a {input.gtf} -o {params.prefix} {input.bam}
+        '''
+
+rule edger:
+    input:
+        expand('results/counts/{sample}.exon.txt', sample=SAMPLES)
+    output:
+        de_results='results/de/de_results.csv',
+        volcano_plot='results/de/volcano_plot.pdf',
+        log2fc_hist='results/de/log2fc_histogram.pdf',
+        pca_plot='results/de/pca_plot.pdf'
+    conda:
+        "envs/edger.yml"
+    params:
+        threads=16
+    script:
+        "edger.R"
+
+rule gsea:
+    input:
+        de_results='results/de/de_results.csv'
+    output:
+        gsea_results='results/gsea_results.csv'
+    conda:
+        "envs/enrichr.yml"
+    params:
+        threads=16
+    script:
+        "enrichr.R"

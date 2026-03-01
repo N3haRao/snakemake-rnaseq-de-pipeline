@@ -1,0 +1,30 @@
+# Snakefile
+import os
+
+# Define sample information
+SAMPLES = {"CTLrep1", "CTLrep2", "CTLrep3", "KOrep1", "KOrep2", "KOrep3"}
+
+rule all:
+    input:
+        'results/full_matrix.csv',
+        'results/counts.csv'
+        
+rule concat_df:
+  input:
+    verse_files = expand('results/counts/{sample}.exon.txt', sample = SAMPLES)
+  output:
+    cts_matrix = 'results/full_matrix.csv'
+  shell:
+    '''
+    python concat_df.py -i {input.verse_files} -o {output.cts_matrix}
+    '''
+
+rule filter_counts:
+    input:
+        matrix = 'results/full_matrix.csv'
+    output:
+        filter = 'results/counts.csv'
+    shell:
+        '''
+        python filter_cts_mat.py -i {input.matrix} -o {output.filter}
+        '''
